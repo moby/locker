@@ -1,3 +1,3 @@
 module github.com/moby/locker
 
-go 1.15
+go 1.13
