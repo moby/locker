@@ -15,6 +15,7 @@ package locker
 
 import (
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 )
@@ -30,7 +31,9 @@ type Locker struct {
 
 // lockCtr is used by Locker to represent a lock with a given name.
 type lockCtr struct {
-	mu sync.Mutex
+	mu       sync.Mutex
+	muWaiter sync.Mutex
+	wait     *sync.Cond
 	// waiters is the number of waiters waiting to acquire the lock
 	// this is int32 instead of uint32 so we can add `-1` in `dec()`
 	waiters int32
@@ -74,22 +77,27 @@ func (l *Locker) Lock(name string) {
 	if l.locks == nil {
 		l.locks = make(map[string]*lockCtr)
 	}
-
 	nameLock, exists := l.locks[name]
 	if !exists {
 		nameLock = &lockCtr{}
 		l.locks[name] = nameLock
+		l.locks[name].wait = sync.NewCond(&nameLock.muWaiter)
 	}
 
 	// increment the nameLock waiters while inside the main mutex
 	// this makes sure that the lock isn't deleted if `Lock` and `Unlock` are called concurrently
 	nameLock.inc()
 	l.mu.Unlock()
-
+	nameLock.muWaiter.Lock()
+	if int(nameLock.count()) >= runtime.NumCPU() {
+		nameLock.wait.Wait()
+	}
+	nameLock.muWaiter.Unlock()
 	// Lock the nameLock outside the main mutex so we don't block other operations
 	// once locked then we can decrement the number of waiters for this lock
 	nameLock.Lock()
 	nameLock.dec()
+	nameLock.wait.Signal()
 }
 
 // Unlock unlocks the mutex with the given name
