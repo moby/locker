@@ -23,8 +23,8 @@ func TestLockCounter(t *testing.T) {
 }
 
 func TestLockerLock(t *testing.T) {
-	l := New()
-	l.Lock("test")
+	l := New[string]()
+	Lock(l, "test")
 	ctr := l.locks["test"]
 
 	if ctr.count() != 0 {
@@ -33,7 +33,7 @@ func TestLockerLock(t *testing.T) {
 
 	chDone := make(chan struct{})
 	go func() {
-		l.Lock("test")
+		Lock(l, "test")
 		close(chDone)
 	}()
 
@@ -59,7 +59,7 @@ func TestLockerLock(t *testing.T) {
 	default:
 	}
 
-	if err := l.Unlock("test"); err != nil {
+	if err := Unlock(l, "test"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,14 +75,14 @@ func TestLockerLock(t *testing.T) {
 }
 
 func TestLockerUnlock(t *testing.T) {
-	l := New()
+	l := New[string]()
 
-	l.Lock("test")
-	l.Unlock("test")
+	Lock(l, "test")
+	Unlock(l, "test")
 
 	chDone := make(chan struct{})
 	go func() {
-		l.Lock("test")
+		Lock(l, "test")
 		close(chDone)
 	}()
 
@@ -94,15 +94,15 @@ func TestLockerUnlock(t *testing.T) {
 }
 
 func TestLockerConcurrency(t *testing.T) {
-	l := New()
+	l := New[string]()
 
 	var wg sync.WaitGroup
 	for i := 0; i <= 10000; i++ {
 		wg.Add(1)
 		go func() {
-			l.Lock("test")
+			Lock(l, "test")
 			// if there is a concurrency issue, will very likely panic here
-			l.Unlock("test")
+			Unlock(l, "test")
 			wg.Done()
 		}()
 	}
@@ -126,26 +126,26 @@ func TestLockerConcurrency(t *testing.T) {
 }
 
 func BenchmarkLocker(b *testing.B) {
-	l := New()
+	l := New[string]()
 	for i := 0; i < b.N; i++ {
-		l.Lock("test")
-		l.Unlock("test")
+		Lock(l, "test")
+		Unlock(l, "test")
 	}
 }
 
 func BenchmarkLockerParallel(b *testing.B) {
-	l := New()
+	l := New[string]()
 	b.SetParallelism(128)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			l.Lock("test")
-			l.Unlock("test")
+			Lock(l, "test")
+			Unlock(l, "test")
 		}
 	})
 }
 
 func BenchmarkLockerMoreKeys(b *testing.B) {
-	l := New()
+	l := New[string]()
 	var keys []string
 	for i := 0; i < 64; i++ {
 		keys = append(keys, strconv.Itoa(i))
@@ -154,8 +154,8 @@ func BenchmarkLockerMoreKeys(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			k := keys[rand.Intn(len(keys))]
-			l.Lock(k)
-			l.Unlock(k)
+			Lock(l, k)
+			Unlock(l, k)
 		}
 	})
 }

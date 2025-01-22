@@ -1,5 +1,10 @@
-Locker
-=====
+Generic Locker
+==============
+
+This project is a fork of [moby/locker](https://github.com/moby/locker), 
+enhanced with generics support. The API has been adjusted to work around the
+lack of support for type parameters in Go methods.
+
 
 locker provides a mechanism for creating finer-grained locking to help
 free up more global locks to handle other tasks.
@@ -23,24 +28,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/moby/locker"
+	"github.com/glkz/locker"
 )
 
 type important struct {
-	locks *locker.Locker
-	data  map[string]interface{}
+	locks *locker.Locker[string]
+	data  map[string]any
 	mu    sync.Mutex
 }
 
-func (i *important) Get(name string) interface{} {
-	i.locks.Lock(name)
-	defer i.locks.Unlock(name)
+func (i *important) Get(name string) any {
+	locker.Lock(i.locks, name)
+	defer locker.Unlock(i.locks, name)
 	return i.data[name]
 }
 
-func (i *important) Create(name string, data interface{}) {
-	i.locks.Lock(name)
-	defer i.locks.Unlock(name)
+func (i *important) Create(name string, data any) {
+	locker.Lock(i.locks, name)
+	defer locker.Unlock(i.locks, name)
 
 	i.createImportant(data)
 
@@ -49,7 +54,7 @@ func (i *important) Create(name string, data interface{}) {
 	i.mu.Unlock()
 }
 
-func (i *important) createImportant(data interface{}) {
+func (i *important) createImportant(data any) {
 	time.Sleep(10 * time.Second)
 }
 ```
