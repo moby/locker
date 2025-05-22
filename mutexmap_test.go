@@ -8,27 +8,13 @@ import (
 	"time"
 )
 
-func TestLockCounter(t *testing.T) {
-	l := &lockCtr{}
-	l.inc()
-
-	if l.waiters != 1 {
-		t.Fatal("counter inc failed")
-	}
-
-	l.dec()
-	if l.waiters != 0 {
-		t.Fatal("counter dec failed")
-	}
-}
-
-func TestLockerLock(t *testing.T) {
-	l := New()
+func TestMutexMap_Lock(t *testing.T) {
+	var l MutexMap[string]
 	l.Lock("test")
 	ctr := l.locks["test"]
 
-	if ctr.count() != 0 {
-		t.Fatalf("expected waiters to be 0, got :%d", ctr.waiters)
+	if w := ctr.waiters.Load(); w != 0 {
+		t.Fatalf("expected waiters to be 0, got %d", w)
 	}
 
 	chDone := make(chan struct{})
@@ -40,7 +26,7 @@ func TestLockerLock(t *testing.T) {
 	chWaiting := make(chan struct{})
 	go func() {
 		for range time.Tick(1 * time.Millisecond) {
-			if ctr.count() == 1 {
+			if ctr.waiters.Load() == 1 {
 				close(chWaiting)
 				break
 			}
@@ -59,9 +45,7 @@ func TestLockerLock(t *testing.T) {
 	default:
 	}
 
-	if err := l.Unlock("test"); err != nil {
-		t.Fatal(err)
-	}
+	l.Unlock("test")
 
 	select {
 	case <-chDone:
@@ -69,13 +53,13 @@ func TestLockerLock(t *testing.T) {
 		t.Fatalf("lock should have completed")
 	}
 
-	if ctr.count() != 0 {
-		t.Fatalf("expected waiters to be 0, got: %d", ctr.count())
+	if w := ctr.waiters.Load(); w != 0 {
+		t.Fatalf("expected waiters to be 0, got %d", w)
 	}
 }
 
-func TestLockerUnlock(t *testing.T) {
-	l := New()
+func TestMutexMap_Unlock(t *testing.T) {
+	var l MutexMap[string]
 
 	l.Lock("test")
 	l.Unlock("test")
@@ -93,8 +77,8 @@ func TestLockerUnlock(t *testing.T) {
 	}
 }
 
-func TestLockerConcurrency(t *testing.T) {
-	l := New()
+func TestMutexMap_Concurrency(t *testing.T) {
+	var l MutexMap[string]
 
 	var wg sync.WaitGroup
 	for i := 0; i <= 10000; i++ {
@@ -125,16 +109,19 @@ func TestLockerConcurrency(t *testing.T) {
 	}
 }
 
-func BenchmarkLocker(b *testing.B) {
-	l := New()
+func BenchmarkMutexMap(b *testing.B) {
+	var l MutexMap[string]
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		l.Lock("test")
+		l.Lock(strconv.Itoa(i))
+		l.Unlock(strconv.Itoa(i))
 		l.Unlock("test")
 	}
 }
 
-func BenchmarkLockerParallel(b *testing.B) {
-	l := New()
+func BenchmarkMutexMap_Parallel(b *testing.B) {
+	var l MutexMap[string]
 	b.SetParallelism(128)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
@@ -144,8 +131,8 @@ func BenchmarkLockerParallel(b *testing.B) {
 	})
 }
 
-func BenchmarkLockerMoreKeys(b *testing.B) {
-	l := New()
+func BenchmarkMutexMap_MoreKeys(b *testing.B) {
+	var l MutexMap[string]
 	var keys []string
 	for i := 0; i < 64; i++ {
 		keys = append(keys, strconv.Itoa(i))

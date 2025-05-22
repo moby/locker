@@ -5,8 +5,7 @@ locker provides a mechanism for creating finer-grained locking to help
 free up more global locks to handle other tasks.
 
 The implementation looks close to a sync.Mutex, however, the user must provide a
-reference to use to refer to the underlying lock when locking and unlocking,
-and unlock may generate an error.
+reference to use to refer to the underlying lock when locking and unlocking.
 
 If a lock with a given name does not exist when `Lock` is called, one is
 created.
@@ -23,11 +22,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/moby/locker"
+	"github.com/moby/locker/v2"
 )
 
 type important struct {
-	locks *locker.Locker
+	locks locker.MutexMap[string]
 	data  map[string]interface{}
 	mu    sync.Mutex
 }
