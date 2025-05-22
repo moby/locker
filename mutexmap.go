@@ -24,6 +24,8 @@ type lockCtr struct {
 	waiters atomic.Int32 // Number of callers waiting to acquire the lock
 }
 
+var lockCtrPool = sync.Pool{New: func() any { return new(lockCtr) }}
+
 // Lock locks the mutex identified by key.
 func (l *MutexMap[T]) Lock(key T) {
 	l.mu.Lock()
@@ -33,7 +35,7 @@ func (l *MutexMap[T]) Lock(key T) {
 
 	nameLock, exists := l.locks[key]
 	if !exists {
-		nameLock = &lockCtr{}
+		nameLock = lockCtrPool.Get().(*lockCtr)
 		l.locks[key] = nameLock
 	}
 
@@ -62,6 +64,7 @@ func (l *MutexMap[T]) Unlock(key T) {
 
 	if nameLock.waiters.Load() <= 0 {
 		delete(l.locks, key)
+		defer lockCtrPool.Put(nameLock)
 	}
 	nameLock.Unlock()
 }
