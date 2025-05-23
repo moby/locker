@@ -5,6 +5,7 @@ free up more global locks to handle other tasks.
 package locker
 
 import (
+	"strconv"
 	"sync"
 	"sync/atomic"
 )
@@ -37,13 +38,29 @@ func (l *MutexMap[T]) Lock(key T) {
 	if !exists {
 		nameLock = lockCtrPool.Get().(*lockCtr)
 		l.locks[key] = nameLock
+
+		if isTesting() {
+			if !nameLock.TryLock() {
+				panic("MutexMap: lock taken from pool is already locked")
+			}
+			nameLock.Unlock()
+			if w := nameLock.waiters.Load(); w != 0 {
+				panic("MutexMap: lock taken from pool has nonzero waiters counter" +
+					" (waiters=" + strconv.Itoa(int(w)) + ")")
+			}
+		}
+		// Defensive coding: force the waiters counter to a known value
+		// just in case the lockCtr we got from the pool was recycled
+		// and not properly reset.
+		nameLock.waiters.Store(1)
+	} else {
+		// Increment the nameLock waiters while inside the main mutex.
+		// This makes sure that the lock isn't deleted if `Lock` and
+		// `Unlock` are called concurrently.
+		nameLock.waiters.Add(1)
 	}
 
-	// Increment the nameLock waiters while inside the main mutex.
-	// This makes sure that the lock isn't deleted if `Lock` and `Unlock` are called concurrently.
-	nameLock.waiters.Add(1)
 	l.mu.Unlock()
-
 	// Lock the nameLock outside the main mutex so we don't block other operations.
 	// Once locked then we can decrement the number of waiters for this lock.
 	nameLock.Lock()
@@ -62,8 +79,23 @@ func (l *MutexMap[T]) Unlock(key T) {
 		(&sync.Mutex{}).Unlock()
 	}
 
-	if nameLock.waiters.Load() <= 0 {
+	if w := nameLock.waiters.Load(); w <= 0 {
 		delete(l.locks, key)
+
+		// Putting a lock back into the pool when the waiters counter is
+		// nonzero would result in some really nasty, subtle
+		// misbehaviour -- which would only manifest when pool items get
+		// reused, i.e. in situations with lots of lock churn. The
+		// counters should be 0 when the lock is deleted from the map
+		// and returned to the pool.
+		if isTesting() && w < 0 {
+			panic("MutexMap: lock unlocked with negative counter" +
+				" (waiters=" + strconv.Itoa(int(w)) + ")")
+		}
+		// But given the consequences of that invariant being violated,
+		// zero out the counter just in case to minimize the impact of
+		// such bugs.
+		nameLock.waiters.Store(0)
 		defer lockCtrPool.Put(nameLock)
 	}
 	nameLock.Unlock()
