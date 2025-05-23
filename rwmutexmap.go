@@ -1,6 +1,7 @@
 package locker
 
 import (
+	"strconv"
 	"sync"
 	"sync/atomic"
 )
@@ -21,7 +22,41 @@ type rwlockCtr struct {
 	readers atomic.Int32 // Number of readers currently holding the lock
 }
 
+// assertReset asserts that l is zeroed out. Under testing it panics if the
+// assertions are false. Otherwise it zeroes out the struct to minimize the
+// impact of whichever bugs caused the invariant to be violated.
+//
+// This function returns l.
+func (l *rwlockCtr) assertReset() *rwlockCtr {
+	// Putting a lock back into the pool when the counters are nonzero would
+	// result in some really nasty, subtle misbehaviour -- which would only
+	// manifest when pool items get reused, i.e. in situations with lots of
+	// lock churn. The counters should be 0 when the lock is deleted from
+	// the map and returned to the pool.
+	if isTesting() {
+		if !l.TryLock() {
+			panic("RWMutexMap: lock is unexpectedly locked")
+		}
+		l.Unlock()
+		r, w := l.readers.Load(), l.waiters.Load()
+		if r != 0 || w != 0 {
+			panic("RWMutexMap: lock has nonzero counters " +
+				"(readers=" + strconv.Itoa(int(r)) +
+				", waiters=" + strconv.Itoa(int(w)) + ")")
+		}
+	}
+	// But given the consequences of that invariant being violated, zero out
+	// the counters just in case to minimize the impact of such bugs.
+	l.waiters.Store(0)
+	l.readers.Store(0)
+	return l
+}
+
 var rwlockCtrPool = sync.Pool{New: func() any { return new(rwlockCtr) }}
+
+func rwPoolPut(nameLock *rwlockCtr) {
+	rwlockCtrPool.Put(nameLock.assertReset())
+}
 
 func (l *RWMutexMap[T]) get(key T) *rwlockCtr {
 	if l.locks == nil {
@@ -31,7 +66,7 @@ func (l *RWMutexMap[T]) get(key T) *rwlockCtr {
 	nameLock, exists := l.locks[key]
 	if !exists {
 		nameLock = rwlockCtrPool.Get().(*rwlockCtr)
-		l.locks[key] = nameLock
+		l.locks[key] = nameLock.assertReset()
 	}
 	return nameLock
 }
@@ -80,7 +115,7 @@ func (l *RWMutexMap[T]) Unlock(key T) {
 
 	if nameLock.waiters.Load() <= 0 && nameLock.readers.Load() <= 0 {
 		delete(l.locks, key)
-		defer rwlockCtrPool.Put(nameLock)
+		defer rwPoolPut(nameLock)
 	}
 	nameLock.Unlock()
 }
@@ -96,7 +131,7 @@ func (l *RWMutexMap[T]) RUnlock(key T) {
 
 	if nameLock.waiters.Load() <= 0 && nameLock.readers.Load() <= 0 {
 		delete(l.locks, key)
-		defer rwlockCtrPool.Put(nameLock)
+		defer rwPoolPut(nameLock)
 	}
 	nameLock.RUnlock()
 }
